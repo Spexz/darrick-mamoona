@@ -1,5 +1,92 @@
+console.log("MyHouseDeals content script loaded 3");
 
-console.log("MyHouseDeals content script loaded 2");
+const MAX_REQUEST = 10;
+let prevResult;
+
+
+async function run(msg) {
+
+    return new Promise(async (resolve, reject) => {
+        
+        
+        // Collect the necessary data. 
+        console.log("Message received for myhousedeals");
+        const addressObj = msg?.address;
+        const filters = msg?.params;
+        // let prevResult; // = msg?.prevResult;
+    
+            
+            
+        const address = addressObj.formatted_address//"6040 n pointe blvd, saint louis, mo 63147";
+        // const mhdUrl = "https://www.myhousedeals.com/home.asp"; 
+    
+        try {
+    
+            // custom search filters
+            let params;
+            let result;
+            let injectionResults;
+    
+            if(!prevResult) {
+                params = {
+                    "SearchARVStart": filters.minARV,
+                    "SearchARVEnd": filters.maxARV,
+                    "SearchAskingStart": filters.minPrice,
+                    "SearchAskingEnd": filters.maxPrice,
+                }
+                
+                injectionResults = await getPropertiesFirstLoad(address, params);
+                result = injectionResults;
+                prevResult = injectionResults;
+                // console.log(injectionResults);
+            } else {
+                // If continuing
+                // injectionResults = await getPropertiesFirstLoad(address, prevResult.params);
+                console.log("continuing");
+                result = prevResult;
+                result.properties = []; 
+                // prevResult = injectionResults;
+            }
+    
+    
+            for(let requestCount = 0; requestCount < MAX_REQUEST; requestCount++) {
+    
+                injectionResults = await getProperties(result.next, result.url);
+                let currentResults = injectionResults;
+                
+                result = {
+                    ...result,
+                    ...currentResults,
+                    properties: [...result.properties, ...currentResults.properties]
+                }
+    
+                if(!currentResults.next || result.properties.length > 20)
+                    break;
+                
+            }
+    
+            // Get page details
+            for(let i in result.properties) {
+                let p = result.properties[i];
+                
+                let propertyDetails = await getPropertyDetails( p.id, p.url );
+                // console.log(i, propertyDetails);
+                result.properties[i] = {...p, ...propertyDetails};
+            }
+    
+            prevResult = result;
+            resolve(result);
+        } catch(e) {
+            // console.log(e);
+            reject({
+                error: e.message
+            });
+        }
+        
+    });
+}
+
+
 
 async function getPropertiesFirstLoad(address, selectedParams = {}) {
     console.log(address);
@@ -33,7 +120,7 @@ async function getPropertiesFirstLoad(address, selectedParams = {}) {
             "credentials": "include"
             });
 
-            console.log(result);
+            // console.log(result);
 
             let html = await result.text();
             let searchUrl = result.url;
@@ -73,7 +160,7 @@ async function getPropertiesFirstLoad(address, selectedParams = {}) {
             }).then(async result => {
                 let html = await result.text();
                 let url = result.url;
-                console.log(html);
+                // console.log(html);
 
                 let parser = new DOMParser();
                 let doc = parser.parseFromString(html, "text/html");
