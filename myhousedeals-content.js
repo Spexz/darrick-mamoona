@@ -2,7 +2,26 @@ console.log("MyHouseDeals content script loaded 3");
 
 const MAX_REQUEST = 10;
 let prevResult;
+const leadTypes = {
+    WD: 1,
+    MS: 2,
+    FD: 3,
+    MM: 4,
+    TF: 5,
+    CF: 99,
+}
 
+const evalXpath = (xpath, document) => {
+    const result = document.evaluate( xpath,
+        document,
+        null,
+        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+        null,
+    );
+
+    return result.snapshotItem(0)?.textContent;
+    
+}
 
 async function run(msg) {
 
@@ -68,10 +87,11 @@ async function run(msg) {
             // Get page details
             for(let i in result.properties) {
                 let p = result.properties[i];
-                
+
+                let headingDetails = await getPropertyHeading(p.id, p.url);
                 let propertyDetails = await getPropertyDetails( p.id, p.url );
                 // console.log(i, propertyDetails);
-                result.properties[i] = {...p, ...propertyDetails};
+                result.properties[i] = {...p, ...propertyDetails, ...headingDetails};
             }
     
             prevResult = result;
@@ -85,8 +105,6 @@ async function run(msg) {
         
     });
 }
-
-
 
 async function getPropertiesFirstLoad(address, selectedParams = {}) {
     console.log(address);
@@ -285,33 +303,9 @@ async function getPropertyDetails(id, referrer) {
     return new Promise((resolve, reject) => {
 
         try {
-
-            const leadTypes = {
-                WD: 1,
-                MS: 2,
-                FD: 3,
-                MM: 4,
-                TF: 5,
-                CF: 99,
-            }
-
             let idNum = id.replace(/[A-Z]/g, "");
-            let leadType = leadTypes[id.substring(0, 2)]
+            let leadType = leadTypes[id.substring(0, 2)];
 
-            const evalXpath = (xpath, document) => {
-                const result = document.evaluate( xpath,
-                    document,
-                    null,
-                    XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
-                    null,
-                );
-
-                return result.snapshotItem(0)?.textContent;
-                
-            }
-
-
-            //fetch(`https://www.myhousedeals.com/property/view/next.asp?offset=${offset}&_=${Date.now()}`, {
             fetch(`https://www.myhousedeals.com/include/details/details-information.asp?leadtype=${leadType}&id=${idNum}&_=${Date.now()}`, {
                 "headers": {
                     "accept": "text/plain, */*; q=0.01",
@@ -351,13 +345,72 @@ async function getPropertyDetails(id, referrer) {
                 let bath = evalXpath(`//div[strong[contains(text(), "Bath")]]`, doc);
                     if(bath) 
                         bath = bath.replace(`Bath:`, "").trim();
-                
 
                 resolve({
                     propertyType,
                     beds: bedrooms,
                     area: sqrtFootage,
                     bath
+                });
+            });
+        } catch(e) {
+            resolve({error: e.message});
+        }
+    });
+}
+
+async function getPropertyHeading(id, referrer) {
+    return new Promise((resolve, reject) => {
+
+        try {
+
+            const leadTypes = {
+                WD: 1,
+                MS: 2,
+                FD: 3,
+                MM: 4,
+                TF: 5,
+                CF: 99,
+            }
+
+            let idNum = id.replace(/[A-Z]/g, "");
+            let leadType = leadTypes[id.substring(0, 2)];
+
+            fetch(`https://www.myhousedeals.com/include/details/details-heading.asp?leadtype=${leadType}&id=${idNum}&_=${Date.now()}`, {
+                "headers": {
+                    "accept": "text/plain, */*; q=0.01",
+                    "accept-language": "en-US,en;q=0.9",
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-origin",
+                    "x-requested-with": "XMLHttpRequest"
+                },
+                "referrer": referrer,
+                "referrerPolicy": "strict-origin-when-cross-origin",
+                "body": null,
+                "method": "GET",
+                "mode": "cors",
+                "credentials": "include"
+            }).then(async result => {
+                let html = await result.text();
+                let url = result.url;
+                // console.log(html);
+
+                let parser = new DOMParser();
+                let doc = parser.parseFromString(html, "text/html");
+
+                let listingDate;
+                let listingDetailsString = evalXpath(`//section[@class="uk-panel"]//p[contains(text(), "Posted:")]`, doc);
+                
+                if(listingDetailsString) {
+                    let listingParts = /Posted:\s([0-9]*\/[0-9]*\/[0-9]*)/.exec(listingDetailsString);
+                    if(listingParts)
+                        listingDate = listingParts[1];
+                }
+
+                resolve({
+                    listingDate
                 });
             });
         } catch(e) {
